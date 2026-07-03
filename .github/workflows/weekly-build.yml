@@ -1,0 +1,427 @@
+# Weekly build workflow for mtkclient
+# Builds standalone executables for Linux and Windows every Monday
+# Uses the latest dependencies from PyPI at build time
+
+name: Weekly Build
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: 'Upload to GitHub Release'
+        type: boolean
+        default: false
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux build (console + GUI)
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Linux Build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libusb-1.0-0-dev \
+            libfuse-dev \
+            libxcb-cursor0 \
+            libxcb-xinerama0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-xkb1 \
+            libxkbcommon-x11-0 \
+            file
+
+      - name: Install Python dependencies (latest)
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          # Install build-time deps first
+          pip install hatchling
+          # Install runtime deps (latest versions from PyPI)
+          pip install \
+            pyusb \
+            pycryptodome \
+            pycryptodomex \
+            colorama \
+            pyserial \
+            mfusepy \
+            pyinstaller
+          # Install optional/extra deps
+          pip install \
+            PySide6 \
+            shiboken6 \
+            keystone-engine \
+            capstone \
+            unicorn \
+            keystone
+
+      - name: Install mtkclient package
+        run: |
+          pip install -e .
+
+      - name: Verify installation
+        run: |
+          python -c "import mtkclient; print('mtkclient imported successfully')"
+          python -c "from mtkclient.mtk import main; print('Console entry point OK')"
+          python -c "from mtkclient.mtk_gui import main; print('GUI entry point OK')"
+          mtk --help 2>&1 | head -5 || true
+
+      - name: Build console executable (PyInstaller)
+        run: |
+          pyinstaller --clean --noconfirm \
+            --name mtk-linux-x86_64 \
+            --onedir \
+            --add-data "mtkclient/Loader:mtkclient/Loader" \
+            --add-data "mtkclient/payloads:mtkclient/payloads" \
+            --add-data "mtkclient/Windows:mtkclient/Windows" \
+            --add-data "mtkclient/Library/Filesystem/bin:mtkclient/Library/Filesystem/bin" \
+            --add-data "mtkclient/Library/Exploit/test:mtkclient/Library/Exploit/test" \
+            --add-data "LICENSE:." \
+            --add-data "README.md:." \
+            --hidden-import mtkclient \
+            --hidden-import mtkclient.mtk \
+            --hidden-import mtkclient.stage2 \
+            --hidden-import mtkclient.Tools.da_parser \
+            --hidden-import mtkclient.Tools.brom_to_offs \
+            --hidden-import mtkclient.Library \
+            --hidden-import mtkclient.Library.mtk_main \
+            --hidden-import mtkclient.Library.mtk_class \
+            --hidden-import mtkclient.config \
+            --hidden-import mtkclient.config.mtk_config \
+            --hidden-import mtkclient.config.payloads \
+            --hidden-import serial \
+            --hidden-import usb \
+            --hidden-import Crypto \
+            --hidden-import Cryptodome \
+            --hidden-import colorama \
+            --hidden-import mfuse \
+            mtk.py
+
+      - name: Build GUI executable (PyInstaller)
+        run: |
+          pyinstaller --clean --noconfirm \
+            --name mtk-gui-linux-x86_64 \
+            --onedir \
+            --add-data "mtkclient/Loader:mtkclient/Loader" \
+            --add-data "mtkclient/payloads:mtkclient/payloads" \
+            --add-data "mtkclient/Windows:mtkclient/Windows" \
+            --add-data "mtkclient/Library/Filesystem/bin:mtkclient/Library/Filesystem/bin" \
+            --add-data "mtkclient/Library/Exploit/test:mtkclient/Library/Exploit/test" \
+            --add-data "mtkclient/gui/images:mtkclient/gui/images" \
+            --add-data "mtkclient/gui/i18n:mtkclient/gui/i18n" \
+            --add-data "LICENSE:." \
+            --add-data "README.md:." \
+            --hidden-import mtkclient \
+            --hidden-import mtkclient.mtk_gui \
+            --hidden-import mtkclient.mtk \
+            --hidden-import mtkclient.stage2 \
+            --hidden-import mtkclient.Tools.da_parser \
+            --hidden-import mtkclient.Tools.brom_to_offs \
+            --hidden-import mtkclient.Library \
+            --hidden-import mtkclient.Library.mtk_main \
+            --hidden-import mtkclient.Library.mtk_class \
+            --hidden-import mtkclient.config \
+            --hidden-import mtkclient.config.mtk_config \
+            --hidden-import mtkclient.config.payloads \
+            --hidden-import mtkclient.gui \
+            --hidden-import mtkclient.gui.main_gui \
+            --hidden-import mtkclient.gui.themes \
+            --hidden-import serial \
+            --hidden-import usb \
+            --hidden-import Crypto \
+            --hidden-import Cryptodome \
+            --hidden-import colorama \
+            --hidden-import mfuse \
+            --hidden-import PySide6 \
+            --hidden-import PySide6.QtCore \
+            --hidden-import PySide6.QtGui \
+            --hidden-import PySide6.QtWidgets \
+            mtk_gui.py
+
+      - name: Strip debug symbols (Linux)
+        run: |
+          # Strip debug info from the built executables
+          find dist -name "*.so*" -exec strip --strip-debug {} \; 2>/dev/null || true
+          find dist -name "mtk-linux*" -type f -exec chmod +x {} \; 2>/dev/null || true
+          find dist -name "mtk-gui-linux*" -type f -exec chmod +x {} \; 2>/dev/null || true
+
+      - name: Create archives
+        run: |
+          cd dist
+          # Console version
+          if [ -d "mtk-linux-x86_64" ]; then
+            tar czf mtk-console-linux-x86_64.tar.gz mtk-linux-x86_64/
+          fi
+          # GUI version
+          if [ -d "mtk-gui-linux-x86_64" ]; then
+            tar czf mtk-gui-linux-x86_64.tar.gz mtk-gui-linux-x86_64/
+          fi
+          ls -lh *.tar.gz 2>/dev/null || echo "No archives created"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtkclient-linux-x86_64
+          path: |
+            dist/mtk-console-linux-x86_64.tar.gz
+            dist/mtk-gui-linux-x86_64.tar.gz
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Windows build (console + GUI)
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Windows Build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
+
+      - name: Install Python dependencies (latest)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          pip install hatchling
+          pip install `
+            pyusb `
+            pycryptodome `
+            pycryptodomex `
+            colorama `
+            pyserial `
+            mfusepy `
+            pyinstaller
+          pip install `
+            PySide6 `
+            shiboken6 `
+            keystone-engine `
+            capstone `
+            unicorn `
+            keystone
+
+      - name: Install mtkclient package
+        run: |
+          pip install -e .
+
+      - name: Verify installation
+        run: |
+          python -c "import mtkclient; print('mtkclient imported successfully')"
+          python -c "from mtkclient.mtk import main; print('Console entry point OK')"
+
+      - name: Build console executable (PyInstaller)
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm `
+            --name mtk-console-windows-x86_64 `
+            --onedir `
+            --add-data "mtkclient/Loader;mtkclient/Loader" `
+            --add-data "mtkclient/payloads;mtkclient/payloads" `
+            --add-data "mtkclient/Windows;mtkclient/Windows" `
+            --add-data "mtkclient/Library/Filesystem/bin;mtkclient/Library/Filesystem/bin" `
+            --add-data "mtkclient/Library/Exploit/test;mtkclient/Library/Exploit/test" `
+            --add-data "LICENSE;." `
+            --add-data "README.md;." `
+            --icon mtkclient/icon.ico `
+            --hidden-import mtkclient `
+            --hidden-import mtkclient.mtk `
+            --hidden-import mtkclient.stage2 `
+            --hidden-import mtkclient.Tools.da_parser `
+            --hidden-import mtkclient.Tools.brom_to_offs `
+            --hidden-import mtkclient.Library `
+            --hidden-import mtkclient.Library.mtk_main `
+            --hidden-import mtkclient.Library.mtk_class `
+            --hidden-import mtkclient.config `
+            --hidden-import mtkclient.config.mtk_config `
+            --hidden-import mtkclient.config.payloads `
+            --hidden-import serial `
+            --hidden-import usb `
+            --hidden-import Crypto `
+            --hidden-import Cryptodome `
+            --hidden-import colorama `
+            --hidden-import mfuse `
+            --collect-submodules mtkclient `
+            mtk.py
+
+      - name: Build GUI executable (PyInstaller)
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm `
+            --name mtk-gui-windows-x86_64 `
+            --onedir `
+            --add-data "mtkclient/Loader;mtkclient/Loader" `
+            --add-data "mtkclient/payloads;mtkclient/payloads" `
+            --add-data "mtkclient/Windows;mtkclient/Windows" `
+            --add-data "mtkclient/Library/Filesystem/bin;mtkclient/Library/Filesystem/bin" `
+            --add-data "mtkclient/Library/Exploit/test;mtkclient/Library/Exploit/test" `
+            --add-data "mtkclient/gui/images;mtkclient/gui/images" `
+            --add-data "mtkclient/gui/i18n;mtkclient/gui/i18n" `
+            --add-data "LICENSE;." `
+            --add-data "README.md;." `
+            --icon mtkclient/icon.ico `
+            --hidden-import mtkclient `
+            --hidden-import mtkclient.mtk_gui `
+            --hidden-import mtkclient.mtk `
+            --hidden-import mtkclient.stage2 `
+            --hidden-import mtkclient.Tools.da_parser `
+            --hidden-import mtkclient.Tools.brom_to_offs `
+            --hidden-import mtkclient.Library `
+            --hidden-import mtkclient.Library.mtk_main `
+            --hidden-import mtkclient.Library.mtk_class `
+            --hidden-import mtkclient.config `
+            --hidden-import mtkclient.config.mtk_config `
+            --hidden-import mtkclient.config.payloads `
+            --hidden-import mtkclient.gui `
+            --hidden-import mtkclient.gui.main_gui `
+            --hidden-import mtkclient.gui.themes `
+            --hidden-import serial `
+            --hidden-import usb `
+            --hidden-import Crypto `
+            --hidden-import Cryptodome `
+            --hidden-import colorama `
+            --hidden-import mfuse `
+            --hidden-import PySide6 `
+            --hidden-import PySide6.QtCore `
+            --hidden-import PySide6.QtGui `
+            --hidden-import PySide6.QtWidgets `
+            --collect-submodules mtkclient `
+            mtk_gui.py
+
+      - name: Create archives (Windows)
+        shell: pwsh
+        run: |
+          cd dist
+          # Console - zip
+          if (Test-Path "mtk-console-windows-x86_64") {
+            Compress-Archive -Path mtk-console-windows-x86_64 -DestinationPath mtk-console-windows-x86_64.zip -Force
+          }
+          # GUI - zip
+          if (Test-Path "mtk-gui-windows-x86_64") {
+            Compress-Archive -Path mtk-gui-windows-x86_64 -DestinationPath mtk-gui-windows-x86_64.zip -Force
+          }
+          Get-ChildItem -Path *.zip | Select-Object Name, Length
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtkclient-windows-x86_64
+          path: |
+            dist/mtk-console-windows-x86_64.zip
+            dist/mtk-gui-windows-x86_64.zip
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Combined release (optional, triggered manually with upload_release=true)
+  # ---------------------------------------------------------------------------
+  release:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_release }}
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate release tag and notes
+        id: vars
+        run: |
+          echo "tag=weekly-build-$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+          echo "name=Weekly Build $(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+          # Build release notes from commit log since last tag
+          git fetch --tags --force 2>/dev/null || true
+          PREV_TAG=$(git tag --list 'weekly-build-*' --sort=-creatordate | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --oneline --no-decorate "$PREV_TAG..HEAD" 2>/dev/null || echo "Initial weekly build")
+          else
+            NOTES="Initial weekly build"
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.name }}
+          body: |
+            ## mtkclient Weekly Build
+            
+            Automated weekly build of **mtkclient** (${{ github.sha }})
+            
+            ### Changes since last weekly build:
+            ${{ steps.vars.outputs.notes }}
+            
+            ### Included:
+            - **Linux x86_64**: Console (mtk) + GUI (mtk_gui) `.tar.gz`
+            - **Windows x86_64**: Console (mtk) + GUI (mtk_gui) `.zip`
+            
+            ### Build info:
+            - Python ${{ env.PYTHON_VERSION }}
+            - PyInstaller (latest)
+            - Dependencies installed at build time from PyPI (latest versions)
+          files: |
+            artifacts/mtkclient-linux-x86_64/*
+            artifacts/mtkclient-windows-x86_64/*
+          draft: false
+          prerelease: true
+          generate_release_notes: false
