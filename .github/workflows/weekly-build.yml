@@ -27,10 +27,10 @@ concurrency:
 env:
   PYTHON_VERSION: "3.13"
 
+# ---------------------------------------------------------------------------
+# Linux build (console + GUI)
+# ---------------------------------------------------------------------------
 jobs:
-  # ---------------------------------------------------------------------------
-  # Linux build (console + GUI)
-  # ---------------------------------------------------------------------------
   build-linux:
     name: Linux Build
     runs-on: ubuntu-24.04
@@ -74,9 +74,9 @@ jobs:
       - name: Install Python dependencies (latest)
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          # Install build-time deps first
+          # Build-time deps
           pip install hatchling
-          # Install runtime deps (latest versions from PyPI)
+          # Runtime deps (latest from PyPI)
           pip install \
             pyusb \
             pycryptodome \
@@ -85,7 +85,7 @@ jobs:
             pyserial \
             mfusepy \
             pyinstaller
-          # Install optional/extra deps
+          # Optional / extra deps
           pip install \
             PySide6 \
             shiboken6 \
@@ -96,13 +96,16 @@ jobs:
 
       - name: Install mtkclient package
         run: |
-          pip install -e .
+          # Full install (not editable) so hatchling's force-include of
+          # mtk.py / mtk_gui.py into mtkclient/ package takes effect
+          pip install .
 
       - name: Verify installation
         run: |
           python -c "import mtkclient; print('mtkclient imported successfully')"
           python -c "from mtkclient.mtk import main; print('Console entry point OK')"
           python -c "from mtkclient.mtk_gui import main; print('GUI entry point OK')"
+          python -c "from mtkclient.stage2 import main; print('stage2 entry point OK')"
           mtk --help 2>&1 | head -5 || true
 
       - name: Build console executable (PyInstaller)
@@ -179,7 +182,6 @@ jobs:
 
       - name: Strip debug symbols (Linux)
         run: |
-          # Strip debug info from the built executables
           find dist -name "*.so*" -exec strip --strip-debug {} \; 2>/dev/null || true
           find dist -name "mtk-linux*" -type f -exec chmod +x {} \; 2>/dev/null || true
           find dist -name "mtk-gui-linux*" -type f -exec chmod +x {} \; 2>/dev/null || true
@@ -187,11 +189,9 @@ jobs:
       - name: Create archives
         run: |
           cd dist
-          # Console version
           if [ -d "mtk-linux-x86_64" ]; then
             tar czf mtk-console-linux-x86_64.tar.gz mtk-linux-x86_64/
           fi
-          # GUI version
           if [ -d "mtk-gui-linux-x86_64" ]; then
             tar czf mtk-gui-linux-x86_64.tar.gz mtk-gui-linux-x86_64/
           fi
@@ -254,7 +254,7 @@ jobs:
 
       - name: Install mtkclient package
         run: |
-          pip install -e .
+          pip install .
 
       - name: Verify installation
         run: |
@@ -343,11 +343,9 @@ jobs:
         shell: pwsh
         run: |
           cd dist
-          # Console - zip
           if (Test-Path "mtk-console-windows-x86_64") {
             Compress-Archive -Path mtk-console-windows-x86_64 -DestinationPath mtk-console-windows-x86_64.zip -Force
           }
-          # GUI - zip
           if (Test-Path "mtk-gui-windows-x86_64") {
             Compress-Archive -Path mtk-gui-windows-x86_64 -DestinationPath mtk-gui-windows-x86_64.zip -Force
           }
@@ -364,7 +362,7 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # Combined release (optional, triggered manually with upload_release=true)
+  # Combined release (optional, manual trigger with upload_release=true)
   # ---------------------------------------------------------------------------
   release:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_release }}
@@ -386,7 +384,6 @@ jobs:
           echo "tag=weekly-build-$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
           echo "name=Weekly Build $(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
-          # Build release notes from commit log since last tag
           git fetch --tags --force 2>/dev/null || true
           PREV_TAG=$(git tag --list 'weekly-build-*' --sort=-creatordate | head -1)
           if [ -n "$PREV_TAG" ]; then
