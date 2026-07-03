@@ -1,6 +1,7 @@
 # Weekly build workflow for mtkclient
 # Builds standalone executables for Linux and Windows every Monday
 # Uses the latest dependencies from PyPI at build time
+# Optimized: strips debug symbols, excludes unused modules, uses UPX on Windows
 
 name: Weekly Build
 
@@ -72,14 +73,13 @@ jobs:
             libegl1 \
             libegl-mesa0 \
             libgl1 \
-            file
+            file \
+            zstd
 
       - name: Install Python dependencies (latest)
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          # Build-time deps
           pip install hatchling
-          # Runtime deps (latest from PyPI)
           pip install \
             pyusb \
             pycryptodome \
@@ -88,7 +88,6 @@ jobs:
             pyserial \
             mfusepy \
             pyinstaller
-          # Optional / extra deps
           pip install \
             PySide6 \
             shiboken6 \
@@ -99,8 +98,6 @@ jobs:
 
       - name: Install mtkclient package
         run: |
-          # Copy root entry points into the package so they resolve correctly
-          # (hatchling force-include only works for wheel builds, not editable)
           cp -v mtk.py mtk_gui.py stage2.py mtkclient/
           pip install -e .
 
@@ -113,7 +110,7 @@ jobs:
 
       - name: Build console executable (PyInstaller)
         run: |
-          pyinstaller --clean --noconfirm \
+          pyinstaller --clean --noconfirm --strip \
             --name mtk-linux-x86_64 \
             --onedir \
             --add-data "mtkclient/Loader:mtkclient/Loader" \
@@ -140,11 +137,32 @@ jobs:
             --hidden-import Cryptodome \
             --hidden-import colorama \
             --hidden-import mfuse \
+            --exclude-module tkinter \
+            --exclude-module unittest \
+            --exclude-module distutils \
+            --exclude-module setuptools \
+            --exclude-module pip \
+            --exclude-module idlelib \
+            --exclude-module http.server \
+            --exclude-module xmlrpc \
+            --exclude-module pdb \
+            --exclude-module lib2to3 \
+            --exclude-module email \
+            --exclude-module turtle \
+            --exclude-module venv \
+            --exclude-module ensurepip \
+            --exclude-module cProfile \
+            --exclude-module profile \
+            --exclude-module PySide6 \
+            --exclude-module PySide6.QtCore \
+            --exclude-module PySide6.QtGui \
+            --exclude-module PySide6.QtWidgets \
+            --exclude-module shiboken6 \
             mtk.py
 
       - name: Build GUI executable (PyInstaller)
         run: |
-          pyinstaller --clean --noconfirm \
+          pyinstaller --clean --noconfirm --strip \
             --name mtk-gui-linux-x86_64 \
             --onedir \
             --add-data "mtkclient/Loader:mtkclient/Loader" \
@@ -181,6 +199,56 @@ jobs:
             --hidden-import PySide6.QtCore \
             --hidden-import PySide6.QtGui \
             --hidden-import PySide6.QtWidgets \
+            --exclude-module tkinter \
+            --exclude-module unittest \
+            --exclude-module distutils \
+            --exclude-module setuptools \
+            --exclude-module pip \
+            --exclude-module idlelib \
+            --exclude-module http.server \
+            --exclude-module xmlrpc \
+            --exclude-module pdb \
+            --exclude-module lib2to3 \
+            --exclude-module email \
+            --exclude-module turtle \
+            --exclude-module venv \
+            --exclude-module ensurepip \
+            --exclude-module cProfile \
+            --exclude-module profile \
+            --exclude-module PySide6.QtNetwork \
+            --exclude-module PySide6.QtSvg \
+            --exclude-module PySide6.QtXml \
+            --exclude-module PySide6.QtHelp \
+            --exclude-module PySide6.QtWebEngine \
+            --exclude-module PySide6.QtWebEngineCore \
+            --exclude-module PySide6.QtWebEngineWidgets \
+            --exclude-module PySide6.QtWebChannel \
+            --exclude-module PySide6.QtWebSockets \
+            --exclude-module PySide6.QtQml \
+            --exclude-module PySide6.QtQuick \
+            --exclude-module PySide6.QtQuick3D \
+            --exclude-module PySide6.QtDBus \
+            --exclude-module PySide6.QtPositioning \
+            --exclude-module PySide6.QtMultimedia \
+            --exclude-module PySide6.QtMultimediaWidgets \
+            --exclude-module PySide6.QtBluetooth \
+            --exclude-module PySide6.QtNfc \
+            --exclude-module PySide6.QtSensors \
+            --exclude-module PySide6.QtTest \
+            --exclude-module PySide6.QtTextToSpeech \
+            --exclude-module PySide6.QtSerialPort \
+            --exclude-module PySide6.QtSvgWidgets \
+            --exclude-module PySide6.QtDataVisualization \
+            --exclude-module PySide6.Qt3DCore \
+            --exclude-module PySide6.Qt3DRender \
+            --exclude-module PySide6.Qt3DInput \
+            --exclude-module PySide6.Qt3DLogic \
+            --exclude-module PySide6.Qt3DExtras \
+            --exclude-module PySide6.QtCharts \
+            --exclude-module PySide6.QtSpatialAudio \
+            --exclude-module PySide6.QtOpenGL \
+            --exclude-module PySide6.QtOpenGLWidgets \
+            --exclude-module PySide6.QtPrintSupport \
             mtk_gui.py
 
       - name: Strip debug symbols (Linux)
@@ -188,30 +256,32 @@ jobs:
           find dist -name "*.so*" -exec strip --strip-debug {} \; 2>/dev/null || true
           find dist -name "mtk-linux*" -type f -exec chmod +x {} \; 2>/dev/null || true
           find dist -name "mtk-gui-linux*" -type f -exec chmod +x {} \; 2>/dev/null || true
+          echo "=== Bundle sizes ==="
+          du -sh dist/*/ 2>/dev/null || true
 
-      - name: Create archives
+      - name: Create archives (zstd compressed)
         run: |
           cd dist
           if [ -d "mtk-linux-x86_64" ]; then
-            tar czf mtk-console-linux-x86_64.tar.gz mtk-linux-x86_64/
+            tar --zstd -cf mtk-console-linux-x86_64.tar.zst mtk-linux-x86_64/
           fi
           if [ -d "mtk-gui-linux-x86_64" ]; then
-            tar czf mtk-gui-linux-x86_64.tar.gz mtk-gui-linux-x86_64/
+            tar --zstd -cf mtk-gui-linux-x86_64.tar.zst mtk-gui-linux-x86_64/
           fi
-          ls -lh *.tar.gz 2>/dev/null || echo "No archives created"
+          ls -lh *.tar.* 2>/dev/null || echo "No archives created"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mtkclient-linux-x86_64
           path: |
-            dist/mtk-console-linux-x86_64.tar.gz
-            dist/mtk-gui-linux-x86_64.tar.gz
+            dist/mtk-console-linux-x86_64.tar.zst
+            dist/mtk-gui-linux-x86_64.tar.zst
           if-no-files-found: warn
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # Windows build (console + GUI)
+  # Windows build (console + GUI) — uses UPX for additional compression
   # ---------------------------------------------------------------------------
   build-windows:
     name: Windows Build
@@ -233,6 +303,24 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             pyproject.toml
+
+      - name: Install UPX (Windows binary compression)
+        shell: pwsh
+        run: |
+          $upxUrl = "https://github.com/upx/upx/releases/download/v5.2.0/upx-5.2.0-win64.zip"
+          $upxZip = "$env:TEMP\upx.zip"
+          $upxDir = "$env:ProgramFiles\upx"
+          Write-Host "Downloading UPX from $upxUrl ..."
+          Invoke-WebRequest -Uri $upxUrl -OutFile $upxZip -UseBasicParsing
+          Expand-Archive -Path $upxZip -DestinationPath $upxDir -Force
+          # UPX v5.x extracts into a subdirectory, move files up
+          $subDir = Get-ChildItem -Path $upxDir -Directory | Select-Object -First 1
+          if ($subDir) {
+            Move-Item -Path "$($subDir.FullName)\*" -Destination $upxDir -Force
+            Remove-Item -Path $subDir.FullName -Recurse -Force
+          }
+          echo "$upxDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          upx --version 2>&1 | Select-Object -First 3
 
       - name: Install Python dependencies (latest)
         shell: pwsh
@@ -257,7 +345,6 @@ jobs:
 
       - name: Install mtkclient package
         run: |
-          # Copy root entry points into the package so they resolve correctly
           copy mtk.py mtkclient\
           copy mtk_gui.py mtkclient\
           copy stage2.py mtkclient\
@@ -268,10 +355,10 @@ jobs:
           python -c "import mtkclient; print('mtkclient imported successfully')"
           python -c "from mtkclient.mtk import main; print('Console entry point OK')"
 
-      - name: Build console executable (PyInstaller)
+      - name: Build console executable (PyInstaller + UPX)
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm `
+          pyinstaller --clean --noconfirm --strip --upx-dir "$env:ProgramFiles\upx" `
             --name mtk-console-windows-x86_64 `
             --onedir `
             --add-data "mtkclient/Loader;mtkclient/Loader" `
@@ -300,12 +387,33 @@ jobs:
             --hidden-import colorama `
             --hidden-import mfuse `
             --collect-submodules mtkclient `
+            --exclude-module tkinter `
+            --exclude-module unittest `
+            --exclude-module distutils `
+            --exclude-module setuptools `
+            --exclude-module pip `
+            --exclude-module idlelib `
+            --exclude-module http.server `
+            --exclude-module xmlrpc `
+            --exclude-module pdb `
+            --exclude-module lib2to3 `
+            --exclude-module email `
+            --exclude-module turtle `
+            --exclude-module venv `
+            --exclude-module ensurepip `
+            --exclude-module cProfile `
+            --exclude-module profile `
+            --exclude-module PySide6 `
+            --exclude-module PySide6.QtCore `
+            --exclude-module PySide6.QtGui `
+            --exclude-module PySide6.QtWidgets `
+            --exclude-module shiboken6 `
             mtk.py
 
-      - name: Build GUI executable (PyInstaller)
+      - name: Build GUI executable (PyInstaller + UPX)
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm `
+          pyinstaller --clean --noconfirm --strip --upx-dir "$env:ProgramFiles\upx" `
             --name mtk-gui-windows-x86_64 `
             --onedir `
             --add-data "mtkclient/Loader;mtkclient/Loader" `
@@ -344,7 +452,71 @@ jobs:
             --hidden-import PySide6.QtGui `
             --hidden-import PySide6.QtWidgets `
             --collect-submodules mtkclient `
+            --exclude-module tkinter `
+            --exclude-module unittest `
+            --exclude-module distutils `
+            --exclude-module setuptools `
+            --exclude-module pip `
+            --exclude-module idlelib `
+            --exclude-module http.server `
+            --exclude-module xmlrpc `
+            --exclude-module pdb `
+            --exclude-module lib2to3 `
+            --exclude-module email `
+            --exclude-module turtle `
+            --exclude-module venv `
+            --exclude-module ensurepip `
+            --exclude-module cProfile `
+            --exclude-module profile `
+            --exclude-module PySide6.QtNetwork `
+            --exclude-module PySide6.QtSvg `
+            --exclude-module PySide6.QtXml `
+            --exclude-module PySide6.QtHelp `
+            --exclude-module PySide6.QtWebEngine `
+            --exclude-module PySide6.QtWebEngineCore `
+            --exclude-module PySide6.QtWebEngineWidgets `
+            --exclude-module PySide6.QtWebChannel `
+            --exclude-module PySide6.QtWebSockets `
+            --exclude-module PySide6.QtQml `
+            --exclude-module PySide6.QtQuick `
+            --exclude-module PySide6.QtQuick3D `
+            --exclude-module PySide6.QtDBus `
+            --exclude-module PySide6.QtPositioning `
+            --exclude-module PySide6.QtMultimedia `
+            --exclude-module PySide6.QtMultimediaWidgets `
+            --exclude-module PySide6.QtBluetooth `
+            --exclude-module PySide6.QtNfc `
+            --exclude-module PySide6.QtSensors `
+            --exclude-module PySide6.QtTest `
+            --exclude-module PySide6.QtTextToSpeech `
+            --exclude-module PySide6.QtSerialPort `
+            --exclude-module PySide6.QtSvgWidgets `
+            --exclude-module PySide6.QtDataVisualization `
+            --exclude-module PySide6.Qt3DCore `
+            --exclude-module PySide6.Qt3DRender `
+            --exclude-module PySide6.Qt3DInput `
+            --exclude-module PySide6.Qt3DLogic `
+            --exclude-module PySide6.Qt3DExtras `
+            --exclude-module PySide6.QtCharts `
+            --exclude-module PySide6.QtSpatialAudio `
+            --exclude-module PySide6.QtOpenGL `
+            --exclude-module PySide6.QtOpenGLWidgets `
+            --exclude-module PySide6.QtPrintSupport `
             mtk_gui.py
+
+      - name: Report sizes before archiving
+        shell: pwsh
+        run: |
+          Write-Host "=== Console bundle total size ==="
+          if (Test-Path "dist/mtk-console-windows-x86_64") {
+            $total = (Get-ChildItem -Path dist/mtk-console-windows-x86_64 -Recurse -File | Measure-Object -Sum Length).Sum
+            Write-Host "$([math]::Round($total/1MB, 1)) MB ($total bytes)"
+          }
+          Write-Host "=== GUI bundle total size ==="
+          if (Test-Path "dist/mtk-gui-windows-x86_64") {
+            $total = (Get-ChildItem -Path dist/mtk-gui-windows-x86_64 -Recurse -File | Measure-Object -Sum Length).Sum
+            Write-Host "$([math]::Round($total/1MB, 1)) MB ($total bytes)"
+          }
 
       - name: Create archives (Windows)
         shell: pwsh
@@ -409,16 +581,24 @@ jobs:
           name: ${{ steps.vars.outputs.name }}
           body: |
             ## mtkclient Weekly Build
-            
+
             Automated weekly build of **mtkclient** (${{ github.sha }})
-            
+
             ### Changes since last weekly build:
             ${{ steps.vars.outputs.notes }}
-            
+
             ### Included:
-            - **Linux x86_64**: Console (mtk) + GUI (mtk_gui) `.tar.gz`
+            - **Linux x86_64**: Console (mtk) + GUI (mtk_gui) `.tar.zst`
             - **Windows x86_64**: Console (mtk) + GUI (mtk_gui) `.zip`
-            
+
+            ### Optimizations applied:
+            - Stripped debug symbols
+            - Excluded unused Python stdlib modules (tkinter, unittest, pip, etc.)
+            - Console build excludes entire PySide6 (saves ≈40 MB)
+            - GUI build excludes 30+ unused PySide6/Qt submodules
+            - Windows builds use UPX compression (automatic via PyInstaller)
+            - Linux builds use zstd compression for archives
+
             ### Build info:
             - Python ${{ env.PYTHON_VERSION }}
             - PyInstaller (latest)
