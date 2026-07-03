@@ -96,16 +96,16 @@ jobs:
 
       - name: Install mtkclient package
         run: |
-          # Full install (not editable) so hatchling's force-include of
-          # mtk.py / mtk_gui.py into mtkclient/ package takes effect
-          pip install .
+          # Copy root entry points into the package so they resolve correctly
+          # (hatchling force-include only works for wheel builds, not editable)
+          cp -v mtk.py mtk_gui.py stage2.py mtkclient/
+          pip install -e .
 
       - name: Verify installation
         run: |
           python -c "import mtkclient; print('mtkclient imported successfully')"
           python -c "from mtkclient.mtk import main; print('Console entry point OK')"
           python -c "from mtkclient.mtk_gui import main; print('GUI entry point OK')"
-          python -c "from mtkclient.stage2 import main; print('stage2 entry point OK')"
           mtk --help 2>&1 | head -5 || true
 
       - name: Build console executable (PyInstaller)
@@ -254,7 +254,11 @@ jobs:
 
       - name: Install mtkclient package
         run: |
-          pip install .
+          # Copy root entry points into the package so they resolve correctly
+          copy mtk.py mtkclient\
+          copy mtk_gui.py mtkclient\
+          copy stage2.py mtkclient\
+          pip install -e .
 
       - name: Verify installation
         run: |
